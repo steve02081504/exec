@@ -1,0 +1,28 @@
+{
+	"name": "@steve02081504/exec",
+	"version": "0.0.0",
+	"description": "cross-platform shell command execution tool",
+	"type": "module",
+	"main": "index.mjs",
+	"scripts": {
+		"test": "node --test"
+	},
+	"keywords": [
+		"exec",
+		"shell",
+		"spawn",
+		"bash",
+		"powershell",
+		"pwsh",
+		"cross-platform"
+	],
+	"author": "steve02081504",
+	"homepage": "https://github.com/steve02081504/exec",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/steve02081504/exec.git"
+	},
+	"bugs": {
+		"url": "https://github.com/steve02081504/exec/issues"
+	}
+}
