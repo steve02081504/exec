@@ -49,18 +49,53 @@ if (code !== 0) {
 ## API Reference
 
 ### `exec(code, options)`
-Executes a command string using the platform's default shell.
+Executes a command string using the platform's default shell (PowerShell on Windows, bash/sh on others).
 - `code`: The command string to execute.
 - `options`: Optional configuration object (see below).
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
 
-### `powershell_exec(code, options)` / `pwsh_exec(code, options)`
-Force execution using Windows PowerShell or PowerShell Core.
+### `sh_exec(code, options)`
+Force execution using `sh`.
+- `code`: The command string to execute.
+- `options`: Optional configuration object.
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
 
-### `bash_exec(code, options)` / `sh_exec(code, options)`
-Force execution using Bash or Sh.
+### `bash_exec(code, options)`
+Force execution using `bash`.
+- `code`: The command string to execute.
+- `options`: Optional configuration object.
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+
+### `powershell_exec(code, options)`
+Force execution using Windows PowerShell (`powershell.exe`).
+- `code`: The command string to execute.
+- `options`: Optional configuration object.
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+
+### `pwsh_exec(code, options)`
+Force execution using PowerShell Core (`pwsh`).
+- `code`: The command string to execute.
+- `options`: Optional configuration object.
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
 
 ### `where_command(command)`
 Cross-platform tool to find the full path of a command (similar to `which` or `where`).
+- `command`: The name of the command to find.
+- Returns: `Promise<string>` - The full path of the command, or an empty string if not found.
+
+### `removeTerminalSequences(str)`
+Removes ANSI terminal sequences (like color codes) from a string.
+- `str`: The string to process.
+- Returns: `string` - The cleaned string.
+
+### `available`
+An object indicating which shells are available on the current system.
+- Type: `{ pwsh: boolean, powershell: boolean, bash: boolean, sh: boolean }`
+
+### `shell_exec_map`
+An object mapping shell names to their corresponding execution functions.
+- Type: `Record<string, Function>`
+- Keys: `'pwsh'`, `'powershell'`, `'bash'`, `'sh'`
 
 ### Options (`options`)
 All execution functions accept an optional `options` object:
@@ -68,3 +103,4 @@ All execution functions accept an optional `options` object:
 - `no_ansi_terminal_sequences`: (boolean) Whether to strip ANSI terminal sequences (like color codes) from the output. Defaults to `false`.
 - `shell`: (string) Path to a specific shell (usually handled automatically by specific exec functions).
 - `args`: (string[]) Extra arguments to pass to the shell.
+- `cmdswitch`: (string) The shell's command switch (e.g., `-c` for sh/bash, `-Command` for PowerShell). Defaults usually handled automatically.
