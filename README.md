@@ -9,6 +9,7 @@ A simple cross-platform Shell command execution utility. It wraps Node.js's `chi
 - **Promise-based API**: All execution functions return a Promise, making them easy to use with `async/await`.
 - **Output Processing**: Supports automatic removal of ANSI terminal sequences (color codes, etc.) and provides stdout, stderr, and a combined `stdall` output.
 - **Command Discovery**: Includes `where_command` to find the full path of executables across platforms.
+- **execFile**: Run a binary with an argv array, no shell (same role as Node’s `execFile`).
 
 ## Installation
 
@@ -19,11 +20,16 @@ npm install @steve02081504/exec
 ## Usage
 
 ```javascript
-import { exec, powershell_exec, bash_exec } from '@steve02081504/exec';
+import { exec, execFile, powershell_exec, bash_exec } from '@steve02081504/exec';
 
 // 1. Execute using the default Shell (PowerShell on Windows, bash/sh on *nix)
 const result = await exec('echo "Hello World"');
 console.log(result.stdout); // "Hello World\n"
+
+// 1b. Run a binary with argv (no shell)
+const node = process.execPath;
+const v = await execFile(node, ['-e', 'console.log("ok")']);
+console.log(v.stdout);
 
 // 2. Explicitly use PowerShell
 const psResult = await powershell_exec('Get-Date');
@@ -52,6 +58,13 @@ if (code !== 0) {
 Executes a command string using the platform's default shell (PowerShell on Windows, bash/sh on others).
 - `code`: The command string to execute.
 - `options`: Optional configuration object (see below).
+- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+
+### `execFile(file, args?, options?)`
+Runs an executable **without** a shell, with an argv array (similar role to Node.js `child_process.execFile`, but not the same call signature).
+- `file`: Path to the executable.
+- `args`: Optional string array of arguments; defaults to `[]`. To supply only `options`, pass an empty array: `execFile(file, [], options)` — unlike Node’s `execFile`, the second argument is **always** treated as argv, not as options.
+- `options`: Optional object passed to `child_process.spawn` after defaults (`windowsHide`, `encoding`), plus this package’s `no_ansi_terminal_sequences`.
 - Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
 
 ### `sh_exec(code, options)`

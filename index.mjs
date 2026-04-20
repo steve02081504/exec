@@ -12,29 +12,25 @@ export function removeTerminalSequences(str) {
 }
 
 /**
- * 执行命令的基础函数。
- * @param {string} code - 要执行的代码。
- * @param {object} options - 选项。
- * @param {string} options.shell - shell 的路径。
- * @param {string} [options.cmdswitch='-c'] - shell 的命令行开关。
- * @param {string[]} [options.args=[]] - shell 的参数。
- * @param {string} [options.cwd=undefined] - 工作目录。
+ * 直接执行可执行文件，参数为 argv 数组。
+ * @param {string} file - 可执行文件路径。
+ * @param {string[]} [args=[]] - 参数列表。
+ * @param {object} [options] - 选项。
  * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
  * @returns {Promise<{code: number, stdout: string, stderr: string, stdall: string}>} - 执行结果。
  */
-async function base_exec(code, {
-	shell,
-	cmdswitch = '-c',
-	args = [],
-	cwd = undefined,
-	no_ansi_terminal_sequences = false
-}) {
+export function execFile(file, args = [], options = {}) {
+	const {
+		no_ansi_terminal_sequences = false,
+	} = options
+	options = {
+		windowsHide: true,
+		encoding: 'utf8',
+		...options,
+	}
+	delete options.no_ansi_terminal_sequences
 	return new Promise((resolve, reject) => {
-		const process = spawn(shell, [...args, cmdswitch, code], {
-			encoding: 'utf8',
-			windowsHide: true,
-			cwd,
-		})
+		const process = spawn(file, args, options)
 		process.on('error', reject)
 		let stdout = ''
 		let stderr = ''
@@ -52,6 +48,30 @@ async function base_exec(code, {
 				[stdout, stderr, stdall] = [stdout, stderr, stdall].map(removeTerminalSequences)
 			resolve({ code, stdout, stderr, stdall })
 		})
+	})
+}
+
+/**
+ * 执行命令的基础函数。
+ * @param {string} code - 要执行的代码。
+ * @param {object} options - 选项。
+ * @param {string} options.shell - shell 的路径。
+ * @param {string} [options.cmdswitch='-c'] - shell 的命令行开关。
+ * @param {string[]} [options.args=[]] - shell 的参数。
+ * @param {string} [options.cwd=undefined] - 工作目录。
+ * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
+ * @returns {Promise<{code: number, stdout: string, stderr: string, stdall: string}>} - 执行结果。
+ */
+function base_exec(code, {
+	shell,
+	cmdswitch = '-c',
+	args = [],
+	cwd = undefined,
+	no_ansi_terminal_sequences = false
+}) {
+	return execFile(shell, [...args, cmdswitch, code], {
+		cwd,
+		no_ansi_terminal_sequences,
 	})
 }
 
@@ -146,7 +166,7 @@ export function powershell_exec(code, options) {
 	return base_pwsh_exec(powershellPath, code, options)
 }
 /**
- * 使用 PowerShell (Core) 执行一个命令字符串。
+ * 使用 PowerShell (Core) 执行一个命令字符串，如果 pwsh 不可用则使用 powershell.exe。
  * @param {string} code - 要执行的命令。
  * @param {object} [options] - 执行选项。
  * @returns {Promise<{code: number, stdout: string, stderr: string, stdall: string}>} - 执行结果。
@@ -162,9 +182,12 @@ export function pwsh_exec(code, options) {
 export async function where_command(command) {
 	let result
 	if (process.platform === 'win32')
-		result = await pwsh_exec(`Get-Command -Name ${command} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Definition`)
+		result = await execFile(`${process.env.SYSTEMROOT}\\system32\\where.exe`, [`${command}`]).then(result => {
+			result.stdout = result.stdout.split('\n')[0]
+			return result
+		})
 	else
-		result = await sh_exec(`which ${command}`)
+		result = await sh_exec(`command -v ${command}`)
 	return result.stdout.trim()
 }
 shPath = await testShPaths([
