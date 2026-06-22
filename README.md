@@ -13,6 +13,8 @@ A lightweight cross-platform utility for running shell commands. It wraps Node.j
 - **Cross-platform defaults**: Uses PowerShell on Windows and bash/sh on Linux and macOS.
 - **Promise-based API**: All execution functions return a Promise and work with `async/await`.
 - **Output handling**: Optionally strips ANSI terminal sequences (via [`ansi-regex`](https://github.com/chalk/ansi-regex)); returns stdout, stderr, and combined `stdall`.
+- **Streaming callbacks**: `on_stdout`, `on_stderr`, `on_stdall`, and `on_close` let you process output as it arrives without waiting for the process to exit.
+- **Skip output buffering**: `no_output_record` avoids accumulating stdout/stderr/stdall in memory; the Promise resolves with only `{ code, signal }` while callbacks still run.
 - **Command discovery**: `where_command` resolves executables to full paths. On Windows, results follow `PATHEXT` and are suitable for direct `spawn` (e.g. `npx.cmd`, not bare `npx`).
 - **execFile**: Run a binary with an argv array, without a shell (same role as Node’s `execFile`).
 
@@ -56,13 +58,21 @@ if (code !== 0) {
     console.error(`Error output: ${stderr}`);
 }
 // signal is non-null when the child was terminated by a signal (e.g. SIGTERM)
+
+// 5. Stream output as it arrives
+let live = '';
+await exec('npm install', {
+    on_stdall: chunk => { live += chunk; process.stdout.write(chunk); },
+    no_output_record: true, // avoid duplicating output in the resolved Promise
+});
+// live holds the full transcript; result is { code, signal } only
 ```
 
 ## API Reference
 
 ### `ExecResult`
 
-All execution functions resolve to:
+By default, all execution functions resolve to:
 
 ```typescript
 {
@@ -74,13 +84,15 @@ All execution functions resolve to:
 }
 ```
 
+When `no_output_record: true`, the Promise resolves to `{ code, signal }` only. Stream callbacks (`on_stdout`, `on_stderr`, `on_stdall`) still receive each chunk as UTF-8 strings; `no_ansi_terminal_sequences` applies only to buffered output at resolve time, not to callback payloads.
+
 ### `exec(code, options?)`
 
 Runs a command string in the platform default shell (PowerShell on Windows, bash/sh elsewhere).
 
 - `code`: Command string to execute.
-- `options`: Optional object forwarded to `child_process.spawn`, plus `no_ansi_terminal_sequences` (see below).
-- Returns: `Promise<ExecResult>`
+- `options`: Optional object forwarded to `child_process.spawn`, plus package-specific options (see [Options](#options-options)).
+- Returns: `Promise<ExecResult>` (or `Promise<{ code, signal }>` when `no_output_record` is set)
 
 ### `execFile(file, args?, options?)`
 
@@ -88,8 +100,8 @@ Runs an executable **without** a shell, using an argv array (similar to Node.js 
 
 - `file`: Path to the executable.
 - `args`: Optional argument array; defaults to `[]`. To pass only `options`, use `execFile(file, [], options)` — unlike Node’s `execFile`, the second argument is **always** argv, not options.
-- `options`: Optional object forwarded to `child_process.spawn` after default `windowsHide: true`, plus `no_ansi_terminal_sequences`. Stdout and stderr are read as UTF-8.
-- Returns: `Promise<ExecResult>`
+- `options`: Optional object forwarded to `child_process.spawn` after default `windowsHide: true`, plus package-specific options (see [Options](#options-options)). Stdout and stderr are read as UTF-8.
+- Returns: `Promise<ExecResult>` (or `Promise<{ code, signal }>` when `no_output_record` is set)
 
 ### `sh_exec(code, options?)`
 
@@ -152,9 +164,14 @@ All execution functions accept an optional `options` object. Most fields are for
 - `env`: Environment variables for the child process.
 - `stdio`, `uid`, `gid`, `detached`, and other [spawn options](https://nodejs.org/api/child_process.html#child_processspawncommand-args-options) are supported.
 
-Package-specific option:
+Package-specific options (not passed to `spawn`):
 
-- `no_ansi_terminal_sequences`: (boolean) Strip ANSI sequences from stdout, stderr, and stdall. Defaults to `false`.
+- `no_ansi_terminal_sequences`: (boolean) Strip ANSI sequences from buffered stdout, stderr, and stdall before resolve. Defaults to `false`. Does not modify data passed to stream callbacks.
+- `no_output_record`: (boolean) Skip accumulating stdout/stderr/stdall. The Promise resolves with `{ code, signal }` only. Stream callbacks still run. Defaults to `false`.
+- `on_stdout`: `(data: string) => void` — called for each stdout chunk (UTF-8).
+- `on_stderr`: `(data: string) => void` — called for each stderr chunk (UTF-8).
+- `on_stdall`: `(data: string) => void` — called for each stdout or stderr chunk, after `on_stdout` / `on_stderr`.
+- `on_close`: `(code: number | null, signal: NodeJS.Signals | null) => void` — called when the child process exits.
 
 Advanced shell overrides (rarely needed; each `*_exec` function sets these automatically):
 

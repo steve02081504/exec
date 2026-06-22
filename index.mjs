@@ -11,6 +11,20 @@ const ansiPattern = ansiRegex()
  */
 
 /**
+ * @typedef {{ code: number | null, signal: NodeJS.Signals | null }} ExecResultWithoutOutput
+ */
+
+/**
+ * @typedef {object} ExecOptions
+ * @property {boolean} [no_ansi_terminal_sequences=false] - 是否在 resolve 前从累积的输出中移除 ANSI 终端序列。
+ * @property {boolean} [no_output_record=false] - 是否跳过 stdout/stderr/stdall 的累积；为 true 时 Promise 仅 resolve `{ code, signal }`。流式回调仍会触发。
+ * @property {(data: string) => void} [on_stdout] - 每次收到 stdout 数据块时调用（UTF-8 字符串）。
+ * @property {(data: string) => void} [on_stderr] - 每次收到 stderr 数据块时调用（UTF-8 字符串）。
+ * @property {(data: string) => void} [on_stdall] - 每次收到 stdout 或 stderr 数据块时调用（在 `on_stdout` / `on_stderr` 之后）。
+ * @property {(code: number | null, signal: NodeJS.Signals | null) => void} [on_close] - 子进程关闭时调用。
+ */
+
+/**
  * 从字符串中移除 ANSI 终端序列。
  * @param {string} str - 要处理的字符串。
  * @returns {string} - 清理后的字符串。
@@ -23,20 +37,25 @@ export function removeTerminalSequences(str) {
  * 直接执行可执行文件，参数为 argv 数组。
  * @param {string} file - 可执行文件路径。
  * @param {string[]} [args=[]] - 参数列表。
- * @param {object} [options] - 除 `no_ansi_terminal_sequences` 外透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - {@link ExecOptions} 中的字段不会传给 `spawn`；其余选项（如 `cwd`、`env`）透传给 `spawn`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果；`no_output_record` 为 true 时不含输出字段。
  */
 export function execFile(file, args = [], options = {}) {
 	const {
 		no_ansi_terminal_sequences = false,
+		no_output_record = false,
+		on_stdout = undefined,
+		on_stderr = undefined,
+		on_stdall = undefined,
+		on_close = undefined,
 		...others
 	} = options
 	options = {
 		windowsHide: true,
 		...others,
 	}
-	delete options.no_ansi_terminal_sequences
+	for (const key of ['no_ansi_terminal_sequences', 'no_output_record', 'on_stdout', 'on_stderr', 'on_stdall', 'on_close'])
+		delete options[key]
 	return new Promise((resolve, reject) => {
 		const process = spawn(file, args, options)
 		process.on('error', reject)
@@ -46,17 +65,26 @@ export function execFile(file, args = [], options = {}) {
 		let stderr = ''
 		let stdall = ''
 		process.stdout?.on?.('data', data => {
+			on_stdout?.(data)
+			on_stdall?.(data)
+			if (no_output_record) return
 			stdout += data
 			stdall += data
 		})
 		process.stderr?.on?.('data', data => {
+			on_stderr?.(data)
+			on_stdall?.(data)
+			if (no_output_record) return
 			stderr += data
 			stdall += data
 		})
 		process.on('close', (code, signal) => {
+			signal ??= null
+			on_close?.(code, signal)
 			if (no_ansi_terminal_sequences)
 				[stdout, stderr, stdall] = [stdout, stderr, stdall].map(removeTerminalSequences)
-			resolve({ code, signal: signal ?? null, stdout, stderr, stdall })
+			if (no_output_record) return resolve({ code, signal })
+			resolve({ code, signal, stdout, stderr, stdall })
 		})
 	})
 }
@@ -64,12 +92,8 @@ export function execFile(file, args = [], options = {}) {
 /**
  * 执行命令的基础函数。
  * @param {string} code - 要执行的代码。
- * @param {object} options - 除 `shell`、`cmdswitch`、`args` 外透传给 `spawn`。
- * @param {string} options.shell - shell 的路径。
- * @param {string} [options.cmdswitch='-c'] - shell 的命令行开关。
- * @param {string[]} [options.args=[]] - shell 的参数。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & { shell: string, cmdswitch?: string, args?: string[] }} options - 除 `shell`、`cmdswitch`、`args` 及 {@link ExecOptions} 字段外透传给 `spawn`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 function base_exec(code, {
 	shell,
@@ -84,8 +108,8 @@ function base_exec(code, {
  * 使用 sh 执行命令的基础函数。
  * @param {string} shellpath - sh 的路径。
  * @param {string} code - 要执行的代码。
- * @param {object} [options] - 透传给 `spawn`。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 function base_sh_exec(shellpath, code, options) {
 	return base_exec(code, {
@@ -97,8 +121,8 @@ function base_sh_exec(shellpath, code, options) {
  * 使用 pwsh 执行命令的基础函数。
  * @param {string} shellpath - pwsh 的路径。
  * @param {string} code - 要执行的代码。
- * @param {object} [options] - 透传给 `spawn`。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 function base_pwsh_exec(shellpath, code, options) {
 	code = `\
@@ -145,9 +169,8 @@ let pwshPath
 /**
  * 使用 sh 执行一个命令字符串。
  * @param {string} code - 要执行的命令。
- * @param {object} [options] - 透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export function sh_exec(code, options) {
 	return base_sh_exec(shPath ?? '/bin/sh', code, options)
@@ -155,9 +178,8 @@ export function sh_exec(code, options) {
 /**
  * 使用 bash 执行一个命令字符串。
  * @param {string} code - 要执行的命令。
- * @param {object} [options] - 透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export function bash_exec(code, options) {
 	return base_sh_exec(bashPath ?? '/bin/bash', code, options)
@@ -165,9 +187,8 @@ export function bash_exec(code, options) {
 /**
  * 使用 Windows PowerShell 执行一个命令字符串。
  * @param {string} code - 要执行的命令。
- * @param {object} [options] - 透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export function powershell_exec(code, options) {
 	return base_pwsh_exec(powershellPath, code, options)
@@ -175,9 +196,8 @@ export function powershell_exec(code, options) {
 /**
  * 使用 PowerShell (Core) 执行一个命令字符串，如果 pwsh 不可用则使用 powershell.exe。
  * @param {string} code - 要执行的命令。
- * @param {object} [options] - 透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export function pwsh_exec(code, options) {
 	return base_pwsh_exec(pwshPath ?? powershellPath, code, options)
@@ -247,9 +267,8 @@ export const shell_exec_map = {
  * 使用当前平台的默认 shell 执行一个命令字符串。
  * 在 Windows 上默认为 PowerShell (Core) 或 Windows PowerShell，在其他系统上默认为 bash 或 sh。
  * @param {string} str - 要执行的命令。
- * @param {object} [options] - 透传给 `spawn`。
- * @param {boolean} [options.no_ansi_terminal_sequences=false] - 是否移除 ANSI 终端序列。
- * @returns {Promise<ExecResult>} - 执行结果。
+ * @param {ExecOptions & object} [options] - 透传给 `execFile`。
+ * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export function exec(str, options) {
 	if (process.platform == 'win32') return pwsh_exec(str, options)

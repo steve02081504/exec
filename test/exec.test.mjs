@@ -39,6 +39,99 @@ test('execFile respects cwd', async () => {
 	assertStreamsConsistent(result)
 })
 
+test('execFile stream callbacks receive stdout, stderr, and stdall', async () => {
+	const stdoutChunks = []
+	const stderrChunks = []
+	const stdallChunks = []
+	const result = await execFile(process.execPath, [
+		'-e',
+		'process.stdout.write("out\\n"); process.stderr.write("err")',
+	], {
+		on_stdout: data => stdoutChunks.push(data),
+		on_stderr: data => stderrChunks.push(data),
+		on_stdall: data => stdallChunks.push(data),
+	})
+	assert.equal(result.code, 0)
+	assert.match(stdoutChunks.join(''), /out/)
+	assert.match(stderrChunks.join(''), /err/)
+	assert.equal(stdallChunks.join(''), stdoutChunks.join('') + stderrChunks.join(''))
+	assert.equal(result.stdout, stdoutChunks.join(''))
+	assert.equal(result.stderr, stderrChunks.join(''))
+	assertStreamsConsistent(result)
+})
+
+test('execFile on_stdall runs after on_stdout and on_stderr', async () => {
+	const order = []
+	await execFile(process.execPath, [
+		'-e',
+		'process.stdout.write("a"); process.stderr.write("b")',
+	], {
+		on_stdout: () => order.push('stdout'),
+		on_stderr: () => order.push('stderr'),
+		on_stdall: () => order.push('stdall'),
+		no_output_record: true,
+	})
+	assert.deepEqual(order, ['stdout', 'stdall', 'stderr', 'stdall'])
+})
+
+test('execFile on_close receives exit code and signal', async () => {
+	/** @type {[number | null, unknown] | undefined} */
+	let closeArgs
+	const result = await execFile(process.execPath, ['-e', 'process.exit(7)'], {
+		on_close: (code, signal) => { closeArgs = [code, signal] },
+	})
+	assert.equal(result.code, 7)
+	assert.equal(result.signal, null)
+	assert.deepEqual(closeArgs, [7, null])
+})
+
+test('execFile no_output_record resolves without buffered output but keeps callbacks', async () => {
+	const stdoutChunks = []
+	const result = await execFile(process.execPath, ['-e', 'console.log("hi")'], {
+		no_output_record: true,
+		on_stdout: data => stdoutChunks.push(data),
+	})
+	assert.equal(result.code, 0)
+	assert.equal(result.signal, null)
+	assert.equal('stdout' in result, false)
+	assert.equal('stderr' in result, false)
+	assert.equal('stdall' in result, false)
+	assert.match(stdoutChunks.join(''), /hi/)
+})
+
+test('execFile no_ansi_terminal_sequences strips buffered output only', async () => {
+	const raw = '\x1B[31mhi\x1B[0m'
+	/** @type {string | undefined} */
+	let callbackData
+	const result = await execFile(process.execPath, [
+		'-e',
+		`process.stdout.write(${JSON.stringify(raw)})`,
+	], {
+		no_ansi_terminal_sequences: true,
+		on_stdout: data => { callbackData = data },
+	})
+	assert.equal(result.code, 0)
+	assert.equal(result.stdout, 'hi')
+	assert.equal(callbackData, raw)
+	assertStreamsConsistent(result)
+})
+
+test('exec stream callbacks work through shell execution', async () => {
+	const stdallChunks = []
+	const result = await exec(
+		process.platform === 'win32'
+			? 'Write-Output "shell-out"'
+			: 'printf shell-out',
+		{
+			on_stdall: data => stdallChunks.push(data),
+		},
+	)
+	assert.equal(result.code, 0)
+	assert.match(stdallChunks.join(''), /shell-out/)
+	assert.match(result.stdout, /shell-out/)
+	assertStreamsConsistent(result)
+})
+
 test('exec forwards env to child process', async () => {
 	const marker = `exec_test_${Date.now()}`
 	const result = await exec(
