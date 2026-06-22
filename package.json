@@ -1,6 +1,6 @@
 {
 	"name": "@steve02081504/exec",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "cross-platform shell command execution tool",
 	"type": "module",
 	"main": "index.mjs",
@@ -24,5 +24,8 @@
 	},
 	"bugs": {
 		"url": "https://github.com/steve02081504/exec/issues"
+	},
+	"dependencies": {
+		"ansi-regex": "latest"
 	}
 }

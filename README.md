@@ -1,15 +1,20 @@
 # @steve02081504/exec
 
-A simple cross-platform Shell command execution utility. It wraps Node.js's `child_process.spawn` to provide a consistent interface for `sh`, `bash`, `PowerShell`, and `pwsh`.
+A lightweight cross-platform utility for running shell commands. It wraps Node.js `child_process.spawn` with a consistent API for `sh`, `bash`, `PowerShell`, and `pwsh`.
+
+## Used by
+
+- [GentianAphrodite](https://github.com/steve02081504/GentianAphrodite)
+- [fount](https://github.com/steve02081504/fount)
 
 ## Features
 
-- **Multi-Shell Support**: Automatically detects and supports `sh`, `bash`, `powershell` (Windows PowerShell), and `pwsh` (PowerShell Core).
-- **Cross-Platform**: Defaults to PowerShell on Windows and bash/sh on Linux/macOS.
-- **Promise-based API**: All execution functions return a Promise, making them easy to use with `async/await`.
-- **Output Processing**: Supports automatic removal of ANSI terminal sequences (color codes, etc.) and provides stdout, stderr, and a combined `stdall` output.
-- **Command Discovery**: Includes `where_command` to find the full path of executables across platforms.
-- **execFile**: Run a binary with an argv array, no shell (same role as Node’s `execFile`).
+- **Multi-shell support**: Automatically detects and supports `sh`, `bash`, `powershell` (Windows PowerShell), and `pwsh` (PowerShell Core).
+- **Cross-platform defaults**: Uses PowerShell on Windows and bash/sh on Linux and macOS.
+- **Promise-based API**: All execution functions return a Promise and work with `async/await`.
+- **Output handling**: Optionally strips ANSI terminal sequences (via [`ansi-regex`](https://github.com/chalk/ansi-regex)); returns stdout, stderr, and combined `stdall`.
+- **Command discovery**: `where_command` resolves executables to full paths. On Windows, results follow `PATHEXT` and are suitable for direct `spawn` (e.g. `npx.cmd`, not bare `npx`).
+- **execFile**: Run a binary with an argv array, without a shell (same role as Node’s `execFile`).
 
 ## Installation
 
@@ -22,21 +27,21 @@ npm install @steve02081504/exec
 ```javascript
 import { exec, execFile, powershell_exec, bash_exec } from '@steve02081504/exec';
 
-// 1. Execute using the default Shell (PowerShell on Windows, bash/sh on *nix)
+// 1. Default shell (PowerShell on Windows, bash/sh on *nix)
 const result = await exec('echo "Hello World"');
 console.log(result.stdout); // "Hello World\n"
 
-// 1b. Run a binary with argv (no shell)
+// 1b. Binary with argv (no shell)
 const node = process.execPath;
 const v = await execFile(node, ['-e', 'console.log("ok")']);
 console.log(v.stdout);
 
-// 2. Explicitly use PowerShell
+// 2. PowerShell explicitly
 const psResult = await powershell_exec('Get-Date');
 console.log(psResult.stdout);
 
-// 3. Explicitly use Bash
-// Note: May fail on Windows if WSL or Git Bash is not in PATH
+// 3. Bash explicitly
+// May fail on Windows if WSL or Git Bash is not in PATH
 try {
     const bashResult = await bash_exec('ls -la');
     console.log(bashResult.stdout);
@@ -44,76 +49,123 @@ try {
     console.error("Bash usage failed:", e);
 }
 
-// 4. Detailed execution result
-const { code, stdout, stderr, stdall } = await exec('ls_non_existent_file');
+// 4. Full result object
+const { code, signal, stdout, stderr, stdall } = await exec('ls_non_existent_file');
 if (code !== 0) {
     console.error(`Command failed with code ${code}`);
     console.error(`Error output: ${stderr}`);
 }
+// signal is non-null when the child was terminated by a signal (e.g. SIGTERM)
 ```
 
 ## API Reference
 
-### `exec(code, options)`
-Executes a command string using the platform's default shell (PowerShell on Windows, bash/sh on others).
-- `code`: The command string to execute.
-- `options`: Optional configuration object (see below).
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+### `ExecResult`
+
+All execution functions resolve to:
+
+```typescript
+{
+  code: number | null;           // exit code; null if the process did not exit normally
+  signal: NodeJS.Signals | null; // set when the child was killed by a signal
+  stdout: string;
+  stderr: string;
+  stdall: string;               // stdout + stderr, in arrival order; useful for agent reads
+}
+```
+
+### `exec(code, options?)`
+
+Runs a command string in the platform default shell (PowerShell on Windows, bash/sh elsewhere).
+
+- `code`: Command string to execute.
+- `options`: Optional object forwarded to `child_process.spawn`, plus `no_ansi_terminal_sequences` (see below).
+- Returns: `Promise<ExecResult>`
 
 ### `execFile(file, args?, options?)`
-Runs an executable **without** a shell, with an argv array (similar role to Node.js `child_process.execFile`, but not the same call signature).
+
+Runs an executable **without** a shell, using an argv array (similar to Node.js `child_process.execFile`, but not the same signature).
+
 - `file`: Path to the executable.
-- `args`: Optional string array of arguments; defaults to `[]`. To supply only `options`, pass an empty array: `execFile(file, [], options)` — unlike Node’s `execFile`, the second argument is **always** treated as argv, not as options.
-- `options`: Optional object passed to `child_process.spawn` after defaults (`windowsHide`, `encoding`), plus this package’s `no_ansi_terminal_sequences`.
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+- `args`: Optional argument array; defaults to `[]`. To pass only `options`, use `execFile(file, [], options)` — unlike Node’s `execFile`, the second argument is **always** argv, not options.
+- `options`: Optional object forwarded to `child_process.spawn` after default `windowsHide: true`, plus `no_ansi_terminal_sequences`. Stdout and stderr are read as UTF-8.
+- Returns: `Promise<ExecResult>`
 
-### `sh_exec(code, options)`
-Force execution using `sh`.
-- `code`: The command string to execute.
-- `options`: Optional configuration object.
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+### `sh_exec(code, options?)`
 
-### `bash_exec(code, options)`
-Force execution using `bash`.
-- `code`: The command string to execute.
-- `options`: Optional configuration object.
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+Forces execution with `sh`.
 
-### `powershell_exec(code, options)`
-Force execution using Windows PowerShell (`powershell.exe`).
-- `code`: The command string to execute.
-- `options`: Optional configuration object.
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+- Returns: `Promise<ExecResult>`
 
-### `pwsh_exec(code, options)`
-Force execution using PowerShell Core (`pwsh`).
-- `code`: The command string to execute.
-- `options`: Optional configuration object.
-- Returns: `Promise<{code: number, stdout: string, stderr: string, stdall: string}>`
+### `bash_exec(code, options?)`
+
+Forces execution with `bash`.
+
+- Returns: `Promise<ExecResult>`
+
+### `powershell_exec(code, options?)`
+
+Forces execution with Windows PowerShell (`powershell.exe`).
+
+- Returns: `Promise<ExecResult>`
+
+### `pwsh_exec(code, options?)`
+
+Forces execution with PowerShell Core (`pwsh`); falls back to `powershell.exe` when `pwsh` is unavailable.
+
+- Returns: `Promise<ExecResult>`
 
 ### `where_command(command)`
-Cross-platform tool to find the full path of a command (similar to `which` or `where`).
-- `command`: The name of the command to find.
-- Returns: `Promise<string>` - The full path of the command, or an empty string if not found.
+
+Finds the full path of a command across platforms (similar to `which` or `where`).
+
+- `command`: Command name to look up.
+- Returns: `Promise<string>` — full path, or an empty string if not found.
+- On Unix-like systems, uses `command -v`.
+- On Windows, uses `where.exe` and picks the first result whose extension matches `PATHEXT` (or an existing `path + ext`), so the path can be passed directly to `execFile` or `spawn`.
 
 ### `removeTerminalSequences(str)`
-Removes ANSI terminal sequences (like color codes) from a string.
-- `str`: The string to process.
-- Returns: `string` - The cleaned string.
+
+Removes ANSI terminal sequences (CSI, OSC, cursor controls, etc.) from a string using `ansi-regex`.
+
+- `str`: String to process.
+- Returns: `string` — cleaned string.
 
 ### `available`
-An object indicating which shells are available on the current system.
+
+Indicates which shells are available on the current system.
+
 - Type: `{ pwsh: boolean, powershell: boolean, bash: boolean, sh: boolean }`
 
 ### `shell_exec_map`
-An object mapping shell names to their corresponding execution functions.
+
+Maps shell names to their execution functions.
+
 - Type: `Record<string, Function>`
 - Keys: `'pwsh'`, `'powershell'`, `'bash'`, `'sh'`
 
 ### Options (`options`)
-All execution functions accept an optional `options` object:
-- `cwd`: (string) Current working directory.
-- `no_ansi_terminal_sequences`: (boolean) Whether to strip ANSI terminal sequences (like color codes) from the output. Defaults to `false`.
-- `shell`: (string) Path to a specific shell (usually handled automatically by specific exec functions).
-- `args`: (string[]) Extra arguments to pass to the shell.
-- `cmdswitch`: (string) The shell's command switch (e.g., `-c` for sh/bash, `-Command` for PowerShell). Defaults usually handled automatically.
+
+All execution functions accept an optional `options` object. Most fields are forwarded to `child_process.spawn`:
+
+- `cwd`: Working directory for the child process.
+- `env`: Environment variables for the child process.
+- `stdio`, `uid`, `gid`, `detached`, and other [spawn options](https://nodejs.org/api/child_process.html#child_processspawncommand-args-options) are supported.
+
+Package-specific option:
+
+- `no_ansi_terminal_sequences`: (boolean) Strip ANSI sequences from stdout, stderr, and stdall. Defaults to `false`.
+
+Advanced shell overrides (rarely needed; each `*_exec` function sets these automatically):
+
+- `shell`: Path to a specific shell executable.
+- `args`: Extra arguments passed before the command switch.
+- `cmdswitch`: Shell command switch (e.g. `-c` for sh/bash, `-Command` for PowerShell).
+
+## Testing
+
+```bash
+npm test
+```
+
+Runs the built-in test suite with Node.js's native test runner (`node --test`).
