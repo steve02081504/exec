@@ -1,9 +1,16 @@
 {
 	"name": "@steve02081504/exec",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "cross-platform shell command execution tool",
 	"type": "module",
 	"main": "index.mjs",
+	"types": "./index.d.mts",
+	"exports": {
+		".": {
+			"types": "./index.d.mts",
+			"default": "./index.mjs"
+		}
+	},
 	"scripts": {
 		"test": "node --test"
 	},

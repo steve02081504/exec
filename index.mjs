@@ -52,6 +52,7 @@ export function execFile(file, args = [], options = {}) {
 	} = options
 	options = {
 		windowsHide: true,
+		encoding: 'utf8',
 		...others,
 	}
 	for (const key of ['no_ansi_terminal_sequences', 'no_output_record', 'on_stdout', 'on_stderr', 'on_stdall', 'on_close'])
