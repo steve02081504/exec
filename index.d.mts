@@ -1,4 +1,4 @@
-import type { SpawnOptionsWithoutStdio } from 'node:child_process'
+import type { ChildProcess, SpawnOptionsWithoutStdio } from 'node:child_process'
 
 /**
  * 子进程执行结果（含累积输出）。
@@ -34,6 +34,8 @@ export interface ExecOptions {
 	no_ansi_terminal_sequences?: boolean
 	/** 是否跳过 stdout/stderr/stdall 的累积；为 `true` 时 Promise 仅 resolve `{ code, signal }`。流式回调仍会触发 */
 	no_output_record?: boolean
+	/** 子进程 spawn 后立即调用，便于读取 `child.pid` 等 */
+	on_spawn?: (child: ChildProcess) => void
 	/** 每次收到 stdout 数据块时调用（UTF-8 字符串） */
 	on_stdout?: (data: string) => void
 	/** 每次收到 stderr 数据块时调用（UTF-8 字符串） */

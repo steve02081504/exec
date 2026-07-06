@@ -13,7 +13,7 @@ A lightweight cross-platform utility for running shell commands. It wraps Node.j
 - **Cross-platform defaults**: Uses PowerShell on Windows and bash/sh on Linux and macOS.
 - **Promise-based API**: All execution functions return a Promise and work with `async/await`.
 - **Output handling**: Optionally strips ANSI terminal sequences (via [`ansi-regex`](https://github.com/chalk/ansi-regex)); returns stdout, stderr, and combined `stdall`.
-- **Streaming callbacks**: `on_stdout`, `on_stderr`, `on_stdall`, and `on_close` let you process output as it arrives without waiting for the process to exit.
+- **Streaming callbacks**: `on_spawn`, `on_stdout`, `on_stderr`, `on_stdall`, and `on_close` let you process output as it arrives or hook the child immediately after spawn.
 - **Skip output buffering**: `no_output_record` avoids accumulating stdout/stderr/stdall in memory; the Promise resolves with only `{ code, signal }` while callbacks still run.
 - **Command discovery**: `where_command` resolves executables to full paths. On Windows, results follow `PATHEXT` and are suitable for direct `spawn` (e.g. `npx.cmd`, not bare `npx`).
 - **execFile**: Run a binary with an argv array, without a shell (same role as Node’s `execFile`).
@@ -168,6 +168,7 @@ Package-specific options (not passed to `spawn`):
 
 - `no_ansi_terminal_sequences`: (boolean) Strip ANSI sequences from buffered stdout, stderr, and stdall before resolve. Defaults to `false`. Does not modify data passed to stream callbacks.
 - `no_output_record`: (boolean) Skip accumulating stdout/stderr/stdall. The Promise resolves with `{ code, signal }` only. Stream callbacks still run. Defaults to `false`.
+- `on_spawn`: `(child: ChildProcess) => void` — called immediately after spawn; use `child.pid` for resource monitoring, etc.
 - `on_stdout`: `(data: string) => void` — called for each stdout chunk (UTF-8).
 - `on_stderr`: `(data: string) => void` — called for each stderr chunk (UTF-8).
 - `on_stdall`: `(data: string) => void` — called for each stdout or stderr chunk, after `on_stdout` / `on_stderr`.

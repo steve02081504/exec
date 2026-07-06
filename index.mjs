@@ -18,6 +18,7 @@ const ansiPattern = ansiRegex()
  * @typedef {object} ExecOptions
  * @property {boolean} [no_ansi_terminal_sequences=false] - 是否在 resolve 前从累积的输出中移除 ANSI 终端序列。
  * @property {boolean} [no_output_record=false] - 是否跳过 stdout/stderr/stdall 的累积；为 true 时 Promise 仅 resolve `{ code, signal }`。流式回调仍会触发。
+ * @property {(child: import('node:child_process').ChildProcess) => void} [on_spawn] - 子进程 spawn 后立即调用，便于读取 `child.pid` 等。
  * @property {(data: string) => void} [on_stdout] - 每次收到 stdout 数据块时调用（UTF-8 字符串）。
  * @property {(data: string) => void} [on_stderr] - 每次收到 stderr 数据块时调用（UTF-8 字符串）。
  * @property {(data: string) => void} [on_stdall] - 每次收到 stdout 或 stderr 数据块时调用（在 `on_stdout` / `on_stderr` 之后）。
@@ -44,6 +45,7 @@ export function execFile(file, args = [], options = {}) {
 	const {
 		no_ansi_terminal_sequences = false,
 		no_output_record = false,
+		on_spawn = undefined,
 		on_stdout = undefined,
 		on_stderr = undefined,
 		on_stdall = undefined,
@@ -55,10 +57,11 @@ export function execFile(file, args = [], options = {}) {
 		encoding: 'utf8',
 		...others,
 	}
-	for (const key of ['no_ansi_terminal_sequences', 'no_output_record', 'on_stdout', 'on_stderr', 'on_stdall', 'on_close'])
+	for (const key of ['no_ansi_terminal_sequences', 'no_output_record', 'on_spawn', 'on_stdout', 'on_stderr', 'on_stdall', 'on_close'])
 		delete options[key]
 	return new Promise((resolve, reject) => {
 		const process = spawn(file, args, options)
+		on_spawn?.(process)
 		process.on('error', reject)
 		process.stdout?.setEncoding?.('utf8')
 		process.stderr?.setEncoding?.('utf8')

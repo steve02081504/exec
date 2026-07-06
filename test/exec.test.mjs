@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 import { test } from 'node:test'
+import v8 from 'node:v8'
 
 import { available, bash_exec, exec, execFile, pwsh_exec, removeTerminalSequences, where_command } from '../index.mjs'
 
@@ -72,6 +76,19 @@ test('execFile on_stdall runs after on_stdout and on_stderr', async () => {
 		no_output_record: true,
 	})
 	assert.deepEqual(order, ['stdout', 'stdall', 'stderr', 'stdall'])
+})
+
+test('execFile on_spawn receives child with pid before exit', async () => {
+	/** @type {import('node:child_process').ChildProcess | undefined} */
+	let spawned
+	const result = await execFile(process.execPath, ['-e', 'setTimeout(() => {}, 200)'], {
+		on_spawn: child => { spawned = child },
+		no_output_record: true,
+	})
+	assert.equal(result.code, 0)
+	assert.ok(spawned)
+	assert.equal(typeof spawned.pid, 'number')
+	assert.ok(spawned.pid > 0)
 })
 
 test('execFile on_close receives exit code and signal', async () => {
