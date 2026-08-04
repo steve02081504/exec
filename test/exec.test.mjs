@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import process from 'node:process'
 import { test } from 'node:test'
-import v8 from 'node:v8'
 
-import { available, bash_exec, exec, execFile, pwsh_exec, removeTerminalSequences, where_command } from '../index.mjs'
+import { available, bash_exec, exec, execFile, powershell_exec, pwsh_exec, removeTerminalSequences, sh_exec, where_command } from '../index.mjs'
+
+const shells = await available
 
 /**
  * @param {{ stdout: string, stderr: string, stdall: string }} result - 执行结果。
@@ -51,8 +49,20 @@ test('execFile stream callbacks receive stdout, stderr, and stdall', async () =>
 		'-e',
 		'process.stdout.write("out\\n"); process.stderr.write("err")',
 	], {
+		/**
+		 * @param {string} data - stdout 数据块。
+		 * @returns {void}
+		 */
 		on_stdout: data => stdoutChunks.push(data),
+		/**
+		 * @param {string} data - stderr 数据块。
+		 * @returns {void}
+		 */
 		on_stderr: data => stderrChunks.push(data),
+		/**
+		 * @param {string} data - stdout 或 stderr 数据块。
+		 * @returns {void}
+		 */
 		on_stdall: data => stdallChunks.push(data),
 	})
 	assert.equal(result.code, 0)
@@ -70,8 +80,11 @@ test('execFile on_stdall runs after on_stdout and on_stderr', async () => {
 		'-e',
 		'process.stdout.write("a"); process.stderr.write("b")',
 	], {
+		/** @returns {void} */
 		on_stdout: () => order.push('stdout'),
+		/** @returns {void} */
 		on_stderr: () => order.push('stderr'),
+		/** @returns {void} */
 		on_stdall: () => order.push('stdall'),
 		no_output_record: true,
 	})
@@ -82,6 +95,10 @@ test('execFile on_spawn receives child with pid before exit', async () => {
 	/** @type {import('node:child_process').ChildProcess | undefined} */
 	let spawned
 	const result = await execFile(process.execPath, ['-e', 'setTimeout(() => {}, 200)'], {
+		/**
+		 * @param {import('node:child_process').ChildProcess} child - 已 spawn 的子进程。
+		 * @returns {void}
+		 */
 		on_spawn: child => { spawned = child },
 		no_output_record: true,
 	})
@@ -95,6 +112,11 @@ test('execFile on_close receives exit code and signal', async () => {
 	/** @type {[number | null, unknown] | undefined} */
 	let closeArgs
 	const result = await execFile(process.execPath, ['-e', 'process.exit(7)'], {
+		/**
+		 * @param {number | null} code - 退出码。
+		 * @param {NodeJS.Signals | null} signal - 退出信号。
+		 * @returns {void}
+		 */
 		on_close: (code, signal) => { closeArgs = [code, signal] },
 	})
 	assert.equal(result.code, 7)
@@ -106,6 +128,10 @@ test('execFile no_output_record resolves without buffered output but keeps callb
 	const stdoutChunks = []
 	const result = await execFile(process.execPath, ['-e', 'console.log("hi")'], {
 		no_output_record: true,
+		/**
+		 * @param {string} data - stdout 数据块。
+		 * @returns {void}
+		 */
 		on_stdout: data => stdoutChunks.push(data),
 	})
 	assert.equal(result.code, 0)
@@ -125,12 +151,106 @@ test('execFile no_ansi_terminal_sequences strips buffered output only', async ()
 		`process.stdout.write(${JSON.stringify(raw)})`,
 	], {
 		no_ansi_terminal_sequences: true,
+		/**
+		 * @param {string} data - stdout 数据块。
+		 * @returns {void}
+		 */
 		on_stdout: data => { callbackData = data },
 	})
 	assert.equal(result.code, 0)
 	assert.equal(result.stdout, 'hi')
 	assert.equal(callbackData, raw)
 	assertStreamsConsistent(result)
+})
+
+test('exec runs a command in the platform default shell', async () => {
+	const result = await exec(
+		process.platform === 'win32'
+			? 'Write-Output "Hello World"'
+			: 'echo "Hello World"',
+	)
+	assert.equal(result.code, 0)
+	assert.match(result.stdout, /Hello World/)
+	assert.equal(result.signal, null)
+	assertStreamsConsistent(result)
+})
+
+test('exec returns non-zero exit code without throwing', async () => {
+	const result = await exec(
+		process.platform === 'win32'
+			? 'exit 3'
+			: 'exit 3',
+	)
+	assert.equal(result.code, 3)
+	assert.equal(result.signal, null)
+	assertStreamsConsistent(result)
+})
+
+test('exec no_output_record resolves without buffered output but keeps callbacks', async () => {
+	const stdallChunks = []
+	const result = await exec(
+		process.platform === 'win32'
+			? 'Write-Output "hi"'
+			: 'echo hi',
+		{
+			no_output_record: true,
+			/**
+			 * @param {string} data - stdout 或 stderr 数据块。
+			 * @returns {void}
+			 */
+			on_stdall: data => stdallChunks.push(data),
+		},
+	)
+	assert.equal(result.code, 0)
+	assert.equal(result.signal, null)
+	assert.equal('stdout' in result, false)
+	assert.match(stdallChunks.join(''), /hi/)
+})
+
+test('exec on_stdall runs after on_stdout and on_stderr', async () => {
+	const order = []
+	const script = process.platform === 'win32'
+		? '[Console]::Out.Write("a"); [Console]::Error.Write("b")'
+		: 'printf a; printf b >&2'
+	await exec(script, {
+		/** @returns {void} */
+		on_stdout: () => order.push('stdout'),
+		/** @returns {void} */
+		on_stderr: () => order.push('stderr'),
+		/** @returns {void} */
+		on_stdall: () => order.push('stdall'),
+		no_output_record: true,
+	})
+	assert.deepEqual(order, ['stdout', 'stdall', 'stderr', 'stdall'])
+})
+
+test('sh_exec runs commands when sh is available', { skip: !shells.sh }, async () => {
+	const result = await sh_exec('printf sh-ok')
+	assert.equal(result.code, 0)
+	assert.match(result.stdout, /sh-ok/)
+	assertStreamsConsistent(result)
+})
+
+test('powershell_exec runs commands when Windows PowerShell is available', {
+	skip: !shells.powershell,
+}, async () => {
+	const result = await powershell_exec('Write-Output "ps-ok"')
+	assert.equal(result.code, 0)
+	assert.match(result.stdout, /ps-ok/)
+	assertStreamsConsistent(result)
+})
+
+test('where_command resolves executables on Unix-like systems', {
+	skip: process.platform === 'win32',
+}, async () => {
+	const path = await where_command('node')
+	assert.ok(path)
+	assert.match(path, /node/)
+
+	const spawnResult = await execFile(path, ['-e', 'console.log(1)'])
+	assert.equal(spawnResult.code, 0)
+	assert.match(spawnResult.stdout, /1/)
+	assertStreamsConsistent(spawnResult)
 })
 
 test('exec stream callbacks work through shell execution', async () => {
@@ -140,6 +260,10 @@ test('exec stream callbacks work through shell execution', async () => {
 			? 'Write-Output "shell-out"'
 			: 'printf shell-out',
 		{
+			/**
+			 * @param {string} data - stdout 或 stderr 数据块。
+			 * @returns {void}
+			 */
 			on_stdall: data => stdallChunks.push(data),
 		},
 	)
@@ -197,14 +321,14 @@ function assertNoNewlines(result) {
 	assert.equal(result.stdout, NO_NEWLINE_2KB_EXPECTED)
 }
 
-test('bash outputs 2KB without newlines', { skip: !available.bash }, async () => {
+test('bash outputs 2KB without newlines', { skip: !shells.bash }, async () => {
 	const result = await bash_exec(NO_NEWLINE_2KB_COMMAND)
 	assert.equal(result.code, 0)
 	assertNoNewlines(result)
 	assertStreamsConsistent(result)
 })
 
-test('pwsh outputs 2KB without newlines', { skip: !available.pwsh && !available.powershell }, async () => {
+test('pwsh outputs 2KB without newlines', { skip: !shells.pwsh && !shells.powershell }, async () => {
 	const result = await pwsh_exec(NO_NEWLINE_2KB_COMMAND)
 	assert.equal(result.code, 0)
 	assertNoNewlines(result)
@@ -212,7 +336,7 @@ test('pwsh outputs 2KB without newlines', { skip: !available.pwsh && !available.
 })
 
 test('bash and pwsh agree on stdout, stderr, and stdall for the same command', {
-	skip: !available.bash || (!available.pwsh && !available.powershell),
+	skip: !shells.bash || (!shells.pwsh && !shells.powershell),
 }, async (t) => {
 	const cases = [
 		{

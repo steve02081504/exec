@@ -146,9 +146,10 @@ exit $LASTEXITCODE`
  * @returns {Promise<string | undefined>} - 可用的路径，如果没有则返回 undefined。
  */
 async function testShPaths(paths) {
-	for (const path of paths)
-		if (await base_sh_exec(path, 'echo 1').catch(() => false))
-			return path
+	for (let path of paths) try {
+		path = await path.toString()
+		if (path && await base_sh_exec(path, 'echo 1')) return path
+	} catch { }
 }
 /**
  * 测试 pwsh 路径是否可用。
@@ -156,19 +157,37 @@ async function testShPaths(paths) {
  * @returns {Promise<string | undefined>} - 可用的路径，如果没有则返回 undefined。
  */
 async function testPwshPaths(paths) {
-	for (const path of paths)
-		if (await base_pwsh_exec(path, '1').catch(() => false))
-			return path
+	for (let path of paths) try {
+		path = await path.toString()
+		if (path && await base_pwsh_exec(path, '1')) return path
+	} catch { }
 }
 
-const powershellPath = await testPwshPaths([
-	'powershell.exe',
-	'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-])
+const shell_path_map = process.platform === 'win32' ? {
+	powershell: 'powershell.exe',
+	pwsh: 'pwsh.exe',
+	bash: undefined,
+	sh: undefined,
+} : {
+	sh: '/bin/sh',
+	bash: '/bin/bash',
+	powershell: undefined,
+	pwsh: undefined,
+}
 
-let shPath
-let bashPath
-let pwshPath
+/**
+ * @typedef {'sh' | 'bash' | 'powershell' | 'pwsh'} ShellName shell的名称。
+ */
+
+/** @type {(value: { [key in ShellName]: boolean }) => void} */
+let available_resolve
+/**
+ * 一个对象，指示哪些 shell 可用。
+ * @type {{ [key in ShellName]: boolean | Promise<boolean> } & Promise<{ [key in ShellName]: boolean }>}
+ */
+export const available = new Promise(resolve => {
+	available_resolve = resolve
+})
 
 /**
  * 使用 sh 执行一个命令字符串。
@@ -176,8 +195,9 @@ let pwshPath
  * @param {ExecOptions & object} [options] - 透传给 `execFile`。
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
-export function sh_exec(code, options) {
-	return base_sh_exec(shPath ?? '/bin/sh', code, options)
+export async function sh_exec(code, options) {
+	await available.sh
+	return base_sh_exec(shell_path_map.sh, code, options)
 }
 /**
  * 使用 bash 执行一个命令字符串。
@@ -185,8 +205,9 @@ export function sh_exec(code, options) {
  * @param {ExecOptions & object} [options] - 透传给 `execFile`。
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
-export function bash_exec(code, options) {
-	return base_sh_exec(bashPath ?? '/bin/bash', code, options)
+export async function bash_exec(code, options) {
+	await available.bash
+	return base_sh_exec(shell_path_map.bash, code, options)
 }
 /**
  * 使用 Windows PowerShell 执行一个命令字符串。
@@ -194,8 +215,9 @@ export function bash_exec(code, options) {
  * @param {ExecOptions & object} [options] - 透传给 `execFile`。
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
-export function powershell_exec(code, options) {
-	return base_pwsh_exec(powershellPath, code, options)
+export async function powershell_exec(code, options) {
+	await available.powershell
+	return base_pwsh_exec(shell_path_map.powershell, code, options)
 }
 /**
  * 使用 PowerShell (Core) 执行一个命令字符串，如果 pwsh 不可用则使用 powershell.exe。
@@ -203,8 +225,20 @@ export function powershell_exec(code, options) {
  * @param {ExecOptions & object} [options] - 透传给 `execFile`。
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
-export function pwsh_exec(code, options) {
-	return base_pwsh_exec(pwshPath ?? powershellPath, code, options)
+export async function pwsh_exec(code, options) {
+	await available.pwsh ?? await available.powershell
+	return base_pwsh_exec(shell_path_map.pwsh ?? shell_path_map.powershell, code, options)
+}
+
+/**
+ * 一个将 shell 名称映射到其执行函数的对象。
+ * @type {{ [key in ShellName]: (code: string, options: ExecOptions & object) => Promise<ExecResult | ExecResultWithoutOutput> }}
+ */
+export const shell_exec_map = {
+	pwsh: pwsh_exec,
+	powershell: powershell_exec,
+	bash: bash_exec,
+	sh: sh_exec,
 }
 
 /**
@@ -226,46 +260,60 @@ export async function where_command(command) {
 		) ?? ''
 	})
 }
-shPath = await testShPaths([
-	'sh',
-	'sh.exe',
-	'/bin/sh',
-	await where_command('sh').catch(() => ''),
-].filter(x => x))
-bashPath = await testShPaths([
-	'bash',
-	'bash.exe',
-	'/bin/bash',
-	'/usr/bin/bash',
-	await where_command('bash').catch(() => ''),
-].filter(x => x))
-pwshPath = await testPwshPaths([
-	'pwsh',
-	'pwsh.exe',
-	await where_command('pwsh').catch(() => ''),
-].filter(x => x))
 
 /**
- * 一个对象，指示哪些 shell 可用。
- * @type {{ pwsh: boolean, powershell: boolean, bash: boolean, sh: boolean }}
+ * 延迟求值的字符串包装，供路径列表在需要时再解析。
+ * @param {() => string | Promise<string>} fn - 返回字符串的函数。
+ * @returns {{ toString: () => string | Promise<string> }} - 带自定义 toString 的对象。
  */
-export const available = {
-	pwsh: !!pwshPath,
-	powershell: !!powershellPath,
-	bash: !!bashPath,
-	sh: !!shPath,
+function lazyString(fn) {
+	return { toString: fn }
 }
-
+const tester_map = {
+	pwsh: testPwshPaths,
+	powershell: testPwshPaths,
+	sh: testShPaths,
+	bash: testShPaths,
+}
 /**
- * 一个将 shell 名称映射到其执行函数的对象。
- * @type {Record<string, Function>}
+ * 异步检测并设置 shell 可执行路径。
+ * @param {ShellName} key - shell 名称。
+ * @param {Array<string | { toString: () => string | Promise<string> }>} paths - 候选路径列表。
+ * @returns {Promise<void>}
  */
-export const shell_exec_map = {
-	pwsh: pwsh_exec,
-	powershell: powershell_exec,
-	bash: bash_exec,
-	sh: sh_exec,
+async function setShellPath(key, paths) {
+	available[key] = (async () => {
+		return available[key] = !!(shell_path_map[key] = await tester_map[key](paths))
+	})()
 }
+for (const [name, paths] of Object.entries({
+	pwsh: [
+		'pwsh',
+		'pwsh.exe',
+		lazyString(() => where_command('pwsh')),
+	],
+	powershell: [
+		'powershell.exe',
+		'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+	],
+	sh: [
+		'sh',
+		'sh.exe',
+		'/bin/sh',
+		lazyString(() => where_command('sh')),
+	],
+	bash: [
+		'bash',
+		'bash.exe',
+		'/bin/bash',
+		'/usr/bin/bash',
+		lazyString(() => where_command('bash')),
+	],
+})) setShellPath(name, paths)
+
+Promise.all(Object.values(available)).then(() => available_resolve(
+	Object.fromEntries(Object.entries(available))
+))
 
 /**
  * 使用当前平台的默认 shell 执行一个命令字符串。
@@ -274,9 +322,9 @@ export const shell_exec_map = {
  * @param {ExecOptions & object} [options] - 透传给 `execFile`。
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
-export function exec(str, options) {
+export async function exec(str, options) {
 	if (process.platform == 'win32') return pwsh_exec(str, options)
-	else if (bashPath) return bash_exec(str, options)
-	else if (shPath) return sh_exec(str, options)
+	else if (await available.bash) return bash_exec(str, options)
+	else if (await available.sh) return sh_exec(str, options)
 	else throw new Error('No shell available')
 }

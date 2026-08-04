@@ -58,6 +58,17 @@ export type ExecResultForOptions<O extends ExecOptions | undefined> =
 
 export type ShellName = 'pwsh' | 'powershell' | 'bash' | 'sh'
 
+/** 各 shell 是否可用的快照 */
+export type AvailableShells = Record<ShellName, boolean>
+
+/**
+ * 指示哪些 shell 可用。模块加载时在后台异步探测路径；各 `*_exec` 会在执行前 `await` 对应项。
+ * 整体 `await available` 得到 {@link AvailableShells}；`available.sh` 等在探测完成前为 `Promise<boolean>`，之后为 `boolean`。
+ */
+export interface Available extends Promise<AvailableShells> {
+	[key: ShellName]: boolean | Promise<boolean>
+}
+
 /**
  * 从字符串中移除 ANSI 终端序列。
  */
@@ -73,7 +84,7 @@ export declare function execFile<O extends ExecFileOptions | undefined = ExecFil
 ): Promise<ExecResultForOptions<O>>
 
 /**
- * 使用 sh 执行一个命令字符串。
+ * 使用 sh 执行一个命令字符串。会等待 {@link available.sh} 探测完成。
  */
 export declare function sh_exec<O extends ExecFileOptions | undefined = ExecFileOptions>(
 	code: string,
@@ -81,7 +92,7 @@ export declare function sh_exec<O extends ExecFileOptions | undefined = ExecFile
 ): Promise<ExecResultForOptions<O>>
 
 /**
- * 使用 bash 执行一个命令字符串。
+ * 使用 bash 执行一个命令字符串。会等待 {@link available.bash} 探测完成。
  */
 export declare function bash_exec<O extends ExecFileOptions | undefined = ExecFileOptions>(
 	code: string,
@@ -89,7 +100,7 @@ export declare function bash_exec<O extends ExecFileOptions | undefined = ExecFi
 ): Promise<ExecResultForOptions<O>>
 
 /**
- * 使用 Windows PowerShell 执行一个命令字符串。
+ * 使用 Windows PowerShell 执行一个命令字符串。会等待 {@link available.powershell} 探测完成。
  */
 export declare function powershell_exec<O extends ExecFileOptions | undefined = ExecFileOptions>(
 	code: string,
@@ -98,6 +109,7 @@ export declare function powershell_exec<O extends ExecFileOptions | undefined = 
 
 /**
  * 使用 PowerShell (Core) 执行一个命令字符串，如果 pwsh 不可用则使用 powershell.exe。
+ * 会等待 {@link available.pwsh}（或 {@link available.powershell}）探测完成。
  */
 export declare function pwsh_exec<O extends ExecFileOptions | undefined = ExecFileOptions>(
 	code: string,
@@ -111,7 +123,7 @@ export declare function pwsh_exec<O extends ExecFileOptions | undefined = ExecFi
 export declare function where_command(command: string): Promise<string>
 
 /** 指示哪些 shell 可用 */
-export declare const available: Record<ShellName, boolean>
+export declare const available: Available
 
 /** 将 shell 名称映射到其执行函数 */
 export declare const shell_exec_map: Record<
@@ -125,6 +137,7 @@ export declare const shell_exec_map: Record<
 /**
  * 使用当前平台的默认 shell 执行一个命令字符串。
  * 在 Windows 上默认为 PowerShell (Core) 或 Windows PowerShell，在其他系统上默认为 bash 或 sh。
+ * 非 Windows 且 bash 与 sh 均不可用时抛出 `Error('No shell available')`。
  */
 export declare function exec<O extends ExecFileOptions | undefined = ExecFileOptions>(
 	str: string,

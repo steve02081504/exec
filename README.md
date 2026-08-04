@@ -10,6 +10,7 @@ A lightweight cross-platform utility for running shell commands. It wraps Node.j
 ## Features
 
 - **Multi-shell support**: Automatically detects and supports `sh`, `bash`, `powershell` (Windows PowerShell), and `pwsh` (PowerShell Core).
+- **Async shell detection**: Shell paths are probed in the background at import time (including lazy `where_command` lookups), so module load stays fast. Each `*_exec` waits for its shell probe before running.
 - **Cross-platform defaults**: Uses PowerShell on Windows and bash/sh on Linux and macOS.
 - **Promise-based API**: All execution functions return a Promise and work with `async/await`.
 - **Output handling**: Optionally strips ANSI terminal sequences (via [`ansi-regex`](https://github.com/chalk/ansi-regex)); returns stdout, stderr, and combined `stdall`.
@@ -27,11 +28,22 @@ npm install @steve02081504/exec
 ## Usage
 
 ```javascript
-import { exec, execFile, powershell_exec, bash_exec } from '@steve02081504/exec';
+import { available, exec, execFile, powershell_exec, bash_exec, shell_exec_map } from '@steve02081504/exec';
 
 // 1. Default shell (PowerShell on Windows, bash/sh on *nix)
 const result = await exec('echo "Hello World"');
 console.log(result.stdout); // "Hello World\n"
+
+// 1a. Shell availability (probed asynchronously at import)
+if (await available.pwsh) // for now `available.*` is Promise<boolean> or boolean
+    console.log('pwsh is available');
+const shells = await available;
+console.log(shells); // e.g. { sh: true, bash: true, pwsh: true, powershell: true }
+if (available.bash) { // after `await available`, all available.* will been boolean
+    await shell_exec_map.bash('echo hi').then(result => {
+		console.log(result.stdout);
+	});
+}
 
 // 1b. Binary with argv (no shell)
 const node = process.execPath;
@@ -80,11 +92,24 @@ By default, all execution functions resolve to:
   signal: NodeJS.Signals | null; // set when the child was killed by a signal
   stdout: string;
   stderr: string;
-  stdall: string;               // stdout + stderr, in arrival order; useful for agent reads
+  stdall: string;               // stdout + stderr in arrival order; useful for agent reads
 }
 ```
 
 When `no_output_record: true`, the Promise resolves to `{ code, signal }` only. Stream callbacks (`on_stdout`, `on_stderr`, `on_stdall`) still receive each chunk as UTF-8 strings; `no_ansi_terminal_sequences` applies only to buffered output at resolve time, not to callback payloads.
+
+### `ExecResultWithoutOutput`
+
+When `no_output_record: true`, execution functions resolve to:
+
+```typescript
+{
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+```
+
+Stream callbacks still receive raw chunks; only the Promise payload omits buffered output fields.
 
 ### `exec(code, options?)`
 
@@ -93,6 +118,7 @@ Runs a command string in the platform default shell (PowerShell on Windows, bash
 - `code`: Command string to execute.
 - `options`: Optional object forwarded to `child_process.spawn`, plus package-specific options (see [Options](#options-options)).
 - Returns: `Promise<ExecResult>` (or `Promise<{ code, signal }>` when `no_output_record` is set)
+- Throws: `Error('No shell available')` on non-Windows systems when neither bash nor sh is available.
 
 ### `execFile(file, args?, options?)`
 
@@ -105,25 +131,25 @@ Runs an executable **without** a shell, using an argv array (similar to Node.js 
 
 ### `sh_exec(code, options?)`
 
-Forces execution with `sh`.
+Forces execution with `sh`. Waits for shell path detection (`available.sh`) before running.
 
 - Returns: `Promise<ExecResult>`
 
 ### `bash_exec(code, options?)`
 
-Forces execution with `bash`.
+Forces execution with `bash`. Waits for shell path detection (`available.bash`) before running.
 
 - Returns: `Promise<ExecResult>`
 
 ### `powershell_exec(code, options?)`
 
-Forces execution with Windows PowerShell (`powershell.exe`).
+Forces execution with Windows PowerShell (`powershell.exe`). Waits for shell path detection (`available.powershell`) before running.
 
 - Returns: `Promise<ExecResult>`
 
 ### `pwsh_exec(code, options?)`
 
-Forces execution with PowerShell Core (`pwsh`); falls back to `powershell.exe` when `pwsh` is unavailable.
+Forces execution with PowerShell Core (`pwsh`); falls back to `powershell.exe` when `pwsh` is unavailable. Waits for `available.pwsh` (or `available.powershell`) before running.
 
 - Returns: `Promise<ExecResult>`
 
@@ -145,16 +171,28 @@ Removes ANSI terminal sequences (CSI, OSC, cursor controls, etc.) from a string 
 
 ### `available`
 
-Indicates which shells are available on the current system.
+Indicates which shells are available on the current system. Probing starts when the module is imported and runs in the background; `where_command` candidates are resolved lazily when needed.
 
-- Type: `{ pwsh: boolean, powershell: boolean, bash: boolean, sh: boolean }`
+The first `await available` after import may take about **2–3 seconds**, depending on the runtime environment (PATH layout, shell startup cost, lazy `where_command` lookups, etc.). Module import itself stays fast; only waiting for the probe results can block.
+
+- Type: `Available` — a thenable that resolves to `AvailableShells` (`Record<'sh' | 'bash' | 'powershell' | 'pwsh', boolean>`).
+- `await available` — wait for all probes and get the full snapshot.
+- `available.sh`, `available.bash`, etc. — each is `Promise<boolean>` until that shell’s probe finishes, then becomes `boolean`. Use `await available.bash` (or rely on `bash_exec`, which awaits internally) before branching on availability.
 
 ### `shell_exec_map`
 
 Maps shell names to their execution functions.
 
-- Type: `Record<string, Function>`
-- Keys: `'pwsh'`, `'powershell'`, `'bash'`, `'sh'`
+- Type: `Record<'sh' | 'bash' | 'powershell' | 'pwsh', (code: string, options?) => Promise<ExecResult>>`
+- Keys: `'sh'`, `'bash'`, `'powershell'`, `'pwsh'`
+
+### TypeScript types
+
+`index.d.mts` also exports:
+
+- `ExecOptions`, `ExecSpawnOptions`, `ExecFileOptions` — options passed to execution functions
+- `ExecResultForOptions<O>` — conditional result type when `no_output_record` is set
+- `ShellName`, `AvailableShells`, `Available`
 
 ### Options (`options`)
 
