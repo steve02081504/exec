@@ -42,6 +42,17 @@ export function removeTerminalSequences(str) {
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果；`no_output_record` 为 true 时不含输出字段。
  */
 export function execFile(file, args = [], options = {}) {
+	if (process.platform === 'win32') switch (file.slice(file.lastIndexOf('.')).toLowerCase()) {
+		case '.bat':
+		case '.cmd':
+			args = ['/c', file, ...args]
+			file = process.env.COMSPEC || 'cmd.exe'
+			break
+		case '.ps1':
+			args = ['-NoProfile', '-NoLogo', '-NonInteractive', '-Command', file, ...args]
+			file = shell_path_map.powershell ?? shell_path_map.pwsh ?? 'powershell.exe'
+			break
+	}
 	const {
 		no_ansi_terminal_sequences = false,
 		no_output_record = false,
@@ -255,7 +266,7 @@ export async function where_command(command) {
 		const exts = (process.env.PATHEXT || '.com;.exe;.bat;.cmd').split(';').filter(Boolean).map(ext => ext.toLowerCase())
 		return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).find(path =>
 			exts.some(
-				ext => path.toLowerCase().endsWith(ext) || existsSync(path + ext)
+				ext => path.toLowerCase().endsWith(ext)
 			)
 		) ?? ''
 	})

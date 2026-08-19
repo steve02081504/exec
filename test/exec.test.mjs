@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 import { test } from 'node:test'
 
@@ -306,6 +309,64 @@ test('where_command returns spawnable path on Windows', { skip: process.platform
 	assert.equal(spawnResult.code, 0)
 	assert.match(spawnResult.stdout, /1/)
 	assertStreamsConsistent(spawnResult)
+})
+
+test('where_command prefers a PATHEXT path when a bare extensionless file exists', { skip: process.platform !== 'win32' }, async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'exec-where-'))
+	const marker = `where-bat-${Date.now()}`
+	const bat = join(dir, 'fount.bat')
+	try {
+		writeFileSync(join(dir, 'fount'), '#!/bin/sh\necho bare\n')
+		writeFileSync(bat, `@echo off\r\necho ${marker}\r\n`)
+
+		const originalPath = process.env.PATH
+		process.env.PATH = `${dir};${originalPath}`
+		try {
+			const path = await where_command('fount')
+			assert.ok(path, 'where_command must resolve fount')
+			assert.match(path.toLowerCase(), /fount\.bat$/i, 'must return the PATHEXT file, not the bare extensionless file')
+
+			const spawnResult = await execFile('cmd.exe', ['/c', path])
+			assert.equal(spawnResult.code, 0, 'resolved path must be the executable command file')
+			assert.match(spawnResult.stdout, new RegExp(marker))
+			assertStreamsConsistent(spawnResult)
+		} finally {
+			process.env.PATH = originalPath
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('execFile runs .bat files through cmd.exe on Windows', { skip: process.platform !== 'win32' }, async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'exec-bat-'))
+	const marker = `execfile-bat-${Date.now()}`
+	const bat = join(dir, 'probe.bat')
+	try {
+		writeFileSync(bat, `@echo off\r\necho ${marker}\r\nexit /b 0\r\n`)
+
+		const result = await execFile(bat, ['first-arg'])
+		assert.equal(result.code, 0)
+		assert.match(result.stdout, new RegExp(marker))
+		assertStreamsConsistent(result)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('execFile runs .cmd files through cmd.exe on Windows', { skip: process.platform !== 'win32' }, async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'exec-cmd-'))
+	const marker = `execfile-cmd-${Date.now()}`
+	const cmd = join(dir, 'probe.cmd')
+	try {
+		writeFileSync(cmd, `@echo off\r\necho ${marker}\r\n`)
+		const result = await execFile(cmd, [])
+		assert.equal(result.code, 0)
+		assert.match(result.stdout, new RegExp(marker))
+		assertStreamsConsistent(result)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
 })
 
 const NO_NEWLINE_2KB_SIZE = 2048
