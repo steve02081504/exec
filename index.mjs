@@ -237,7 +237,7 @@ export async function powershell_exec(code, options) {
  * @returns {Promise<ExecResult | ExecResultWithoutOutput>} - 执行结果。
  */
 export async function pwsh_exec(code, options) {
-	await available.pwsh ?? await available.powershell
+	await available.pwsh || await available.powershell
 	return base_pwsh_exec(shell_path_map.pwsh ?? shell_path_map.powershell, code, options)
 }
 

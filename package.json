@@ -1,6 +1,6 @@
 {
 	"name": "@steve02081504/exec",
-	"version": "0.0.8",
+	"version": "0.0.9",
 	"description": "cross-platform shell command execution tool",
 	"type": "module",
 	"main": "index.mjs",
